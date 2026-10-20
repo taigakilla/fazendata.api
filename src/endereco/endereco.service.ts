@@ -11,16 +11,4 @@ export class EnderecoService {
   async BuscarTiposLogradouro() {
     return this.prisma.tipoLogradouro.findMany();
   }
-
-  async BuscarEnderecos() {
-    return this.prisma.endereco.findMany();
-  }
-
-  async BuscarEnderecoPorId(id: number) {
-    return this.prisma.endereco.findUnique({
-      where: {
-        IdEndereco: id,
-      },
-    });
-  }
 }

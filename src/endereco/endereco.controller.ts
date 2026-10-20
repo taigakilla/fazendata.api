@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import { EnderecoService } from './endereco.service';
 
 @Controller('endereco')
@@ -13,16 +13,5 @@ export class EnderecoController {
   @Get('tipo-logradouro')
   BuscarTiposLogradouro() {
     return this.enderecoService.BuscarTiposLogradouro();
-  }
-
-  @Get('todos')
-  BuscarEnderecos() {
-    return this.enderecoService.BuscarEnderecos();
-  }
-
-  @Get('/:enderecoId')
-  BuscarEnderecoPorId(@Param('enderecoId') IdEndereco: string) {
-    const id = parseInt(IdEndereco, 10);
-    return this.enderecoService.BuscarEnderecoPorId(id);
   }
 }

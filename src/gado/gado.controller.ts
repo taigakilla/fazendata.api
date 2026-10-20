@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { UsuarioLogado } from '../auth/usuario-logado.decorator';
 import { AcessoService } from '../shared/acesso/acesso.service';
 import { CreateGadoDto } from './dto/create-gado.dto';
@@ -27,10 +35,10 @@ export class GadoController {
   @Patch(':id')
   async update(
     @UsuarioLogado() idPessoa: number,
-    @Param('id') id: string, // O ID vem da rota
-    @Body() updateGadoDto: UpdateGadoDto, // O corpo contém apenas os campos que podem ser alterados
+    @Param('id', ParseIntPipe) id: number,
+    @Body() updateGadoDto: UpdateGadoDto,
   ) {
-    await this.acessoService.garantirAcessoGado(idPessoa, +id);
+    await this.acessoService.garantirAcessoGado(idPessoa, id);
     if (updateGadoDto.IdFazenda) {
       await this.acessoService.garantirAcessoFazenda(
         idPessoa,
@@ -43,20 +51,18 @@ export class GadoController {
   @Get('fazenda/:fazendaId')
   async findByFazendaId(
     @UsuarioLogado() idPessoa: number,
-    @Param('fazendaId') fazendaId: string,
+    @Param('fazendaId', ParseIntPipe) fazendaId: number,
   ) {
-    const id = parseInt(fazendaId, 10);
-    await this.acessoService.garantirAcessoFazenda(idPessoa, id);
-    return this.gadoService.BuscarAnimalPorFazenda(id);
+    await this.acessoService.garantirAcessoFazenda(idPessoa, fazendaId);
+    return this.gadoService.BuscarAnimalPorFazenda(fazendaId);
   }
   @Get(':GadoId')
   async BuscarAnimalPorFazenda(
     @UsuarioLogado() idPessoa: number,
-    @Param('GadoId') GadoId: string,
+    @Param('GadoId', ParseIntPipe) GadoId: number,
   ) {
-    const id = parseInt(GadoId, 10);
-    await this.acessoService.garantirAcessoGado(idPessoa, id);
-    return this.gadoService.BuscarGadoPorId(id);
+    await this.acessoService.garantirAcessoGado(idPessoa, GadoId);
+    return this.gadoService.BuscarGadoPorId(GadoId);
   }
 
   @Post('vacinar')
@@ -74,9 +80,9 @@ export class GadoController {
   @Get('vacina/:id')
   async BuscarVacinasPorGado(
     @UsuarioLogado() idPessoa: number,
-    @Param('id') id: string,
+    @Param('id', ParseIntPipe) id: number,
   ) {
-    await this.acessoService.garantirAcessoGado(idPessoa, +id);
-    return this.gadoService.BuscarVacinasPorGado(+id);
+    await this.acessoService.garantirAcessoGado(idPessoa, id);
+    return this.gadoService.BuscarVacinasPorGado(id);
   }
 }

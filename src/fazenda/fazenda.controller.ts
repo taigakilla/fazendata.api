@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Get,
   Param,
+  ParseIntPipe,
   Post,
 } from '@nestjs/common';
 import { UsuarioLogado } from '../auth/usuario-logado.decorator';
@@ -29,14 +30,13 @@ export class FazendaController {
   @Get('pessoa/:pessoaId')
   async findFazendas(
     @UsuarioLogado() idPessoa: number,
-    @Param('pessoaId') pessoaId: string,
+    @Param('pessoaId', ParseIntPipe) pessoaId: number,
   ) {
-    const id = parseInt(pessoaId, 10);
-    if (id !== idPessoa) {
+    if (pessoaId !== idPessoa) {
       throw new ForbiddenException(
         'Você só pode listar as suas próprias fazendas.',
       );
     }
-    return this.fazendaService.BuscarTodasFazendas(id);
+    return this.fazendaService.BuscarTodasFazendas(pessoaId);
   }
 }

@@ -5,12 +5,9 @@ import { PrismaService } from 'src/shared/prisma/prisma.service';
 export class PessoaService {
   constructor(private readonly prisma: PrismaService) {}
   findPessoas() {
-    return this.prisma.pessoa.findMany();
-  }
-
-  findPessoaPorId(idPessoa: number) {
-    return this.prisma.pessoa.findUnique({
-      where: { IdPessoa: idPessoa },
+    return this.prisma.pessoa.findMany({
+      select: { IdPessoa: true, Nome: true },
+      orderBy: { Nome: 'asc' },
     });
   }
 }

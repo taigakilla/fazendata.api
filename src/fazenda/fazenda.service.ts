@@ -26,12 +26,6 @@ export class FazendaService {
       );
     }
 
-    if (!UF) {
-      throw new BadRequestException(
-        `O endereço com ID ${createFazendaDto.UF} não existe.`,
-      );
-    }
-
     if (!IdDono) {
       throw new BadRequestException(
         `A pessoa com o ID ${createFazendaDto.IdDono} não existe.`,
@@ -45,39 +39,46 @@ export class FazendaService {
       throw new BadRequestException(`A pessoa com o ID ${IdDono} não existe.`);
     }
 
-    const endereco = await this.prisma.endereco.create({
-      data: {
-        Logradouro,
-        Complemento,
-        Bairro,
-        CEP,
-        Numero,
-        Cidade,
-        IdTipoLogradouro,
-        UF,
-      },
+    const estado = await this.prisma.unidadeFederativa.findUnique({
+      where: { UF },
     });
+    if (!estado) {
+      throw new BadRequestException(`O estado ${UF} não existe.`);
+    }
 
-    const fazendaData = await this.prisma.fazenda.create({
+    const tipoLogradouro = await this.prisma.tipoLogradouro.findUnique({
+      where: { IdTipoLogradouro },
+    });
+    if (!tipoLogradouro) {
+      throw new BadRequestException(
+        `Tipo de logradouro com ID ${IdTipoLogradouro} não existe.`,
+      );
+    }
+
+    return this.prisma.fazenda.create({
       data: {
-        IdEndereco: endereco.IdEndereco,
         Nome,
-        IdDono,
+        Dono: { connect: { IdPessoa: IdDono } },
+        Endereco: {
+          create: {
+            Logradouro,
+            Complemento,
+            Bairro,
+            CEP,
+            Numero,
+            Cidade,
+            IdTipoLogradouro,
+            UF,
+          },
+        },
+        // Quem cadastrou e o dono passam a ter acesso à fazenda.
+        FazendaPessoa: {
+          create: [...new Set([IdPessoa, IdDono])].map((id) => ({
+            IdPessoa: id,
+          })),
+        },
       },
     });
-    // Quem cadastrou e o dono passam a ter acesso à fazenda.
-    await this.prisma.fazendaPessoa.createMany({
-      data: [...new Set([IdPessoa, IdDono])].map((id) => ({
-        IdPessoa: id,
-        IdFazenda: fazendaData.IdFazenda,
-      })),
-    });
-
-    const fazenda = await this.prisma.fazenda.findUnique({
-      where: { IdFazenda: fazendaData.IdFazenda },
-    });
-
-    return fazenda;
   }
 
   async BuscarTodasFazendas(idPessoa: number) {
@@ -90,7 +91,7 @@ export class FazendaService {
         },
       },
       include: {
-        Dono: true,
+        Dono: { select: { IdPessoa: true, Nome: true } },
         Endereco: {
           include: { TipoLogradouro: true },
         },
