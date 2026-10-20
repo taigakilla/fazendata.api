@@ -5,9 +5,8 @@ import {
 } from '@nestjs/common';
 import * as bcryptjs from 'bcryptjs';
 import { PrismaService } from '../shared/prisma/prisma.service';
+import { PERMISSOES, TIPO_USUARIO } from '../shared/acesso/permissoes';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
-
-const TIPO_USUARIO_ADMINISTRADOR = 1;
 
 @Injectable()
 export class UsuarioService {
@@ -15,7 +14,9 @@ export class UsuarioService {
 
   async create(createUsuarioDto: CreateUsuarioDto) {
     const email = createUsuarioDto.email.trim().toLowerCase();
-    const { Nome, password, IdSexo } = createUsuarioDto;
+    const { Nome, password, IdSexo, Fazendas = [] } = createUsuarioDto;
+    const IdTipoUsuario =
+      createUsuarioDto.IdTipoUsuario ?? TIPO_USUARIO.ADMINISTRADOR;
 
     const existente = await this.prisma.usuario.findUnique({
       where: { email },
@@ -39,12 +40,43 @@ export class UsuarioService {
           create: {
             email,
             password: hash,
-            IdTipoUsuario: TIPO_USUARIO_ADMINISTRADOR,
+            IdTipoUsuario,
           },
+        },
+        FazendaPessoa: {
+          create: [...new Set(Fazendas)].map((IdFazenda) => ({ IdFazenda })),
         },
       },
     });
 
-    return { IdPessoa: pessoa.IdPessoa, Nome: pessoa.Nome, email };
+    return {
+      IdPessoa: pessoa.IdPessoa,
+      Nome: pessoa.Nome,
+      email,
+      IdTipoUsuario,
+    };
+  }
+
+  async me(idPessoa: number) {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { IdPessoa: idPessoa },
+      select: {
+        email: true,
+        IdTipoUsuario: true,
+        TipoUsuario: { select: { Descricao: true } },
+        Pessoa: { select: { IdPessoa: true, Nome: true } },
+      },
+    });
+    if (!usuario) {
+      throw new BadRequestException('Usuário não encontrado.');
+    }
+    return {
+      IdPessoa: usuario.Pessoa.IdPessoa,
+      Nome: usuario.Pessoa.Nome,
+      email: usuario.email,
+      IdTipoUsuario: usuario.IdTipoUsuario,
+      TipoUsuario: usuario.TipoUsuario.Descricao,
+      Permissoes: PERMISSOES[usuario.IdTipoUsuario] ?? [],
+    };
   }
 }

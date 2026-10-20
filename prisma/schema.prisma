@@ -19,6 +19,16 @@ model Gado {
   PesoAtual           Decimal         @db.Decimal(5, 2)
   IdRaca              Int
   Nome                String          @db.VarChar(40)
+  IdPai               Int?
+  IdMae               Int?
+  Ativo               Boolean         @default(true)
+  DataSaida           DateTime?
+  MotivoSaida         String?         @db.VarChar(20)
+  ObservacaoSaida     String?         @db.VarChar(200)
+  Pai                 Gado?           @relation("Pai", fields: [IdPai], references: [IdGado])
+  Mae                 Gado?           @relation("Mae", fields: [IdMae], references: [IdGado])
+  FilhosComoPai       Gado[]          @relation("Pai")
+  FilhosComoMae       Gado[]          @relation("Mae")
   TipoGado            TipoGado        @relation(fields: [IdTipoGado], references: [IdTipoGado])
   Fazenda             Fazenda         @relation(fields: [IdFazenda], references: [IdFazenda])
   Sexo                Sexo            @relation(fields: [IdSexo], references: [IdSexo])

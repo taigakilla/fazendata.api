@@ -12,6 +12,8 @@ import {
 import { UsuarioLogado } from '../auth/usuario-logado.decorator';
 import { AcessoService } from '../shared/acesso/acesso.service';
 import { CreateGadoDto } from './dto/create-gado.dto';
+import { PesagemDto } from './dto/pesagem.dto';
+import { SaidaDto } from './dto/saida.dto';
 import { UpdateGadoDto } from './dto/update-gado.dto';
 import { VacinarGadoDto } from './dto/vacinar-gado.dto';
 import { GadoService } from './gado.service';
@@ -28,6 +30,7 @@ export class GadoController {
     @UsuarioLogado() idPessoa: number,
     @Body() createGadoDto: CreateGadoDto,
   ) {
+    await this.acessoService.garantirPermissao(idPessoa, 'gado.cadastrar');
     await this.acessoService.garantirAcessoFazenda(
       idPessoa,
       createGadoDto.IdFazenda,
@@ -40,6 +43,7 @@ export class GadoController {
     @Param('id', ParseIntPipe) id: number,
     @Body() updateGadoDto: UpdateGadoDto,
   ) {
+    await this.acessoService.garantirPermissao(idPessoa, 'gado.editar');
     await this.acessoService.garantirAcessoGado(idPessoa, id);
     if (updateGadoDto.IdFazenda) {
       await this.acessoService.garantirAcessoFazenda(
@@ -54,9 +58,44 @@ export class GadoController {
   async findByFazendaId(
     @UsuarioLogado() idPessoa: number,
     @Param('fazendaId', ParseIntPipe) fazendaId: number,
+    @Query('inativos') inativos?: string,
   ) {
     await this.acessoService.garantirAcessoFazenda(idPessoa, fazendaId);
-    return this.gadoService.BuscarAnimalPorFazenda(fazendaId);
+    return this.gadoService.BuscarAnimalPorFazenda(
+      fazendaId,
+      inativos === 'true',
+    );
+  }
+
+  @Post(':id/pesagem')
+  async pesar(
+    @UsuarioLogado() idPessoa: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() pesagemDto: PesagemDto,
+  ) {
+    await this.acessoService.garantirPermissao(idPessoa, 'gado.pesar');
+    await this.acessoService.garantirAcessoGado(idPessoa, id);
+    return this.gadoService.pesar(id, pesagemDto, idPessoa);
+  }
+
+  @Post(':id/saida')
+  async registrarSaida(
+    @UsuarioLogado() idPessoa: number,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() saidaDto: SaidaDto,
+  ) {
+    await this.acessoService.garantirPermissao(idPessoa, 'gado.saida');
+    await this.acessoService.garantirAcessoGado(idPessoa, id);
+    return this.gadoService.registrarSaida(id, saidaDto, idPessoa);
+  }
+
+  @Get(':id/genealogia')
+  async BuscarGenealogia(
+    @UsuarioLogado() idPessoa: number,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    await this.acessoService.garantirAcessoGado(idPessoa, id);
+    return this.gadoService.BuscarGenealogia(id);
   }
   @Get(':GadoId')
   async BuscarAnimalPorFazenda(
@@ -91,6 +130,7 @@ export class GadoController {
     @UsuarioLogado() idPessoa: number,
     @Body() vacinarGadoDto: VacinarGadoDto,
   ) {
+    await this.acessoService.garantirPermissao(idPessoa, 'gado.vacinar');
     await this.acessoService.garantirAcessoGado(
       idPessoa,
       vacinarGadoDto.IdGado,

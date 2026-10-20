@@ -11,5 +11,7 @@ export class LoginDto {
 export class LoginResponseDto {
   IdPessoa: number;
   Nome: string;
+  IdTipoUsuario: number;
+  Permissoes: string[];
   access_token: string;
 }

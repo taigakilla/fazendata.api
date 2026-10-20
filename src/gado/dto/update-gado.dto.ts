@@ -80,4 +80,12 @@ export class UpdateGadoDto {
   @IsOptional()
   @IsInt()
   IdStatusPrenhez?: number;
+
+  @IsOptional()
+  @IsInt()
+  IdPai?: number | null;
+
+  @IsOptional()
+  @IsInt()
+  IdMae?: number | null;
 }

@@ -1,17 +1,84 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { AcessoService } from '../shared/acesso/acesso.service';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { CreateGadoDto } from './dto/create-gado.dto';
+import { PesagemDto } from './dto/pesagem.dto';
+import { SaidaDto } from './dto/saida.dto';
 import { UpdateGadoDto } from './dto/update-gado.dto';
 import { VacinarGadoDto } from './dto/vacinar-gado.dto';
 import { diferencas, EntradaHistorico, normalizar } from './historico';
+import { previsaoParto, situacaoVacinas } from './indicadores';
 
 export const TIPO_GADO = { LEITEIRO: 1, CORTE: 2, REPRODUTOR: 3 } as const;
 export const SEXO = { MACHO: 1, FEMEA: 2 } as const;
 
 @Injectable()
 export class GadoService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly acesso: AcessoService,
+  ) {}
+
+  private async garantirAtivo(idGado: number) {
+    const gado = await this.prisma.gado.findUnique({
+      where: { IdGado: idGado },
+      select: { Ativo: true },
+    });
+    if (!gado) {
+      throw new BadRequestException(`Gado com ID ${idGado} não encontrado.`);
+    }
+    if (!gado.Ativo) {
+      throw new BadRequestException('Este animal já saiu do rebanho.');
+    }
+  }
+
+  private async validarGenealogia(
+    idPessoa: number,
+    dados: {
+      IdGado?: number;
+      IdPai?: number | null;
+      IdMae?: number | null;
+      DataNascimento: Date;
+    },
+  ) {
+    const pais: [number | null | undefined, number, string][] = [
+      [dados.IdPai, SEXO.MACHO, 'pai'],
+      [dados.IdMae, SEXO.FEMEA, 'mãe'],
+    ];
+    for (const [id, sexo, papel] of pais) {
+      if (id == null) continue;
+      if (id === dados.IdGado) {
+        throw new BadRequestException(
+          `O animal não pode ser a própria ${papel}.`,
+        );
+      }
+      await this.acesso.garantirAcessoGado(idPessoa, id);
+      const parente = await this.prisma.gado.findUnique({
+        where: { IdGado: id },
+        select: { IdSexo: true, DataNascimento: true },
+      });
+      if (parente.IdSexo !== sexo) {
+        throw new BadRequestException(
+          papel === 'pai' ? 'O pai deve ser macho.' : 'A mãe deve ser fêmea.',
+        );
+      }
+      if (parente.DataNascimento >= new Date(dados.DataNascimento)) {
+        throw new BadRequestException(
+          `O(a) ${papel} deve ter nascido antes do animal.`,
+        );
+      }
+    }
+  }
+
+  private async nomeDoGado(id: number | null | undefined) {
+    if (id == null) return id;
+    const gado = await this.prisma.gado.findUnique({
+      where: { IdGado: id },
+      select: { Nome: true, NumeroIdentificacao: true },
+    });
+    return gado ? gado.Nome || `Nº ${gado.NumeroIdentificacao}` : null;
+  }
 
   private validarSexoDoTipo(IdTipoGado: number, IdSexo: number) {
     switch (IdTipoGado) {
@@ -133,6 +200,13 @@ export class GadoService {
       IdStatusPrenhez:
         IdTipoGado === TIPO_GADO.LEITEIRO ? IdStatusPrenhez : undefined,
     });
+    if (idPessoa) {
+      await this.validarGenealogia(idPessoa, {
+        IdPai: gadoData.IdPai,
+        IdMae: gadoData.IdMae,
+        DataNascimento: gadoData.DataNascimento,
+      });
+    }
 
     const status =
       IdTipoGado === TIPO_GADO.LEITEIRO
@@ -249,12 +323,17 @@ export class GadoService {
         Sexo: true,
         Raca: true,
         Fazenda: true,
+        Pai: true,
+        Mae: true,
         GadoFemea: { include: { StatusPrenhez: true, GadoLeiteiro: true } },
         GadoMacho: { include: { GadoCorte: true, GadoReprodutor: true } },
       },
     });
     if (!existente) {
       throw new BadRequestException(`Gado com ID ${id} não encontrado.`);
+    }
+    if (!existente.Ativo) {
+      throw new BadRequestException('Este animal já saiu do rebanho.');
     }
 
     // Trocar o tipo exigiria mover os dados entre as tabelas específicas.
@@ -272,6 +351,14 @@ export class GadoService {
       IdStatusPrenhez:
         tipo === TIPO_GADO.LEITEIRO ? IdStatusPrenhez : undefined,
     });
+    if (idPessoa && (gadoData.IdPai != null || gadoData.IdMae != null)) {
+      await this.validarGenealogia(idPessoa, {
+        IdGado: id,
+        IdPai: gadoData.IdPai,
+        IdMae: gadoData.IdMae,
+        DataNascimento: gadoData.DataNascimento ?? existente.DataNascimento,
+      });
+    }
 
     const entradas = await this.calcularAlteracoes(existente, updateGadoDto);
     // Mesmo instante no gado e no histórico, para a comparação com a tag NFC.
@@ -349,6 +436,8 @@ export class GadoService {
         Sexo: true;
         Raca: true;
         Fazenda: true;
+        Pai: true;
+        Mae: true;
         GadoFemea: { include: { StatusPrenhez: true; GadoLeiteiro: true } };
         GadoMacho: { include: { GadoCorte: true; GadoReprodutor: true } };
       };
@@ -356,7 +445,7 @@ export class GadoService {
     dto: UpdateGadoDto,
   ) {
     // Para ids, o histórico guarda o nome (ex.: raça "Nelore"), não o número.
-    const [sexo, raca, fazenda, status] = await Promise.all([
+    const [sexo, raca, fazenda, status, pai, mae] = await Promise.all([
       dto.IdSexo != null
         ? this.prisma.sexo.findUnique({ where: { IdSexo: dto.IdSexo } })
         : null,
@@ -373,7 +462,12 @@ export class GadoService {
             where: { IdStatusPrenhez: dto.IdStatusPrenhez },
           })
         : null,
+      this.nomeDoGado(dto.IdPai),
+      this.nomeDoGado(dto.IdMae),
     ]);
+    const nome = (
+      gado: { Nome: string; NumeroIdentificacao: number } | null,
+    ) => (gado ? gado.Nome || `Nº ${gado.NumeroIdentificacao}` : null);
     const leiteiro = existente.GadoFemea?.GadoLeiteiro;
     const corte = existente.GadoMacho?.GadoCorte;
     const reprodutor = existente.GadoMacho?.GadoReprodutor;
@@ -393,6 +487,8 @@ export class GadoService {
         dto.PesoNascimentoEmKg,
       ],
       PesoAtual: [existente.PesoAtual, dto.PesoAtual],
+      Pai: [nome(existente.Pai), pai],
+      Mae: [nome(existente.Mae), mae],
       ...(existente.GadoFemea && {
         StatusPrenhez: [
           existente.GadoFemea.StatusPrenhez.Descricao.trim(),
@@ -429,21 +525,185 @@ export class GadoService {
     });
   }
 
-  async BuscarAnimalPorFazenda(fazendaId: number) {
-    return this.prisma.gado.findMany({
+  async BuscarAnimalPorFazenda(fazendaId: number, inativos = false) {
+    const gados = await this.prisma.gado.findMany({
       where: {
         IdFazenda: fazendaId,
+        ...(!inativos && { Ativo: true }),
       },
       include: {
         Sexo: true,
         TipoGado: true,
         Raca: true,
+        GadoFemea: { include: { StatusPrenhez: true, GadoLeiteiro: true } },
+        AnimalVacina: {
+          select: { IdVacina: true, DataAplicacao: true, DataProxima: true },
+        },
+      },
+      orderBy: [{ Ativo: 'desc' }, { Nome: 'asc' }],
+    });
+    const agora = new Date();
+    return gados.map(({ AnimalVacina, ...gado }) => {
+      const vacinas = situacaoVacinas(AnimalVacina, agora);
+      return {
+        ...gado,
+        PrevisaoParto: previsaoParto(gado.GadoFemea),
+        VacinasAtrasadas: vacinas.atrasadas.length,
+        VacinasProximas: vacinas.proximas.length,
+      };
+    });
+  }
+
+  async pesar(id: number, dto: PesagemDto, idPessoa: number) {
+    await this.garantirAtivo(id);
+    const atual = await this.prisma.gado.findUnique({
+      where: { IdGado: id },
+      select: { PesoAtual: true },
+    });
+    const agora = new Date();
+    return this.prisma.$transaction(async (tx) => {
+      const gado = await tx.gado.update({
+        where: { IdGado: id },
+        data: { PesoAtual: dto.PesoAtual, AtualizadoEm: agora },
+      });
+      await tx.gadoHistorico.create({
+        data: {
+          IdGado: id,
+          Campo: 'PesoAtual',
+          ValorAnterior: normalizar(atual.PesoAtual),
+          ValorNovo: normalizar(dto.PesoAtual),
+          IdPessoa: idPessoa,
+          CriadoEm: agora,
+        },
+      });
+      return gado;
+    });
+  }
+
+  async registrarSaida(id: number, dto: SaidaDto, idPessoa: number) {
+    const gado = await this.prisma.gado.findUnique({
+      where: { IdGado: id },
+      include: { Fazenda: true },
+    });
+    if (!gado) {
+      throw new BadRequestException(`Gado com ID ${id} não encontrado.`);
+    }
+    if (!gado.Ativo) {
+      throw new BadRequestException('Este animal já saiu do rebanho.');
+    }
+
+    const agora = new Date();
+    const entradas: EntradaHistorico[] = [];
+    let data: Prisma.GadoUncheckedUpdateInput;
+
+    if (dto.Motivo === 'Transferencia') {
+      if (dto.IdFazendaDestino == null) {
+        throw new BadRequestException('Informe a fazenda de destino.');
+      }
+      if (dto.IdFazendaDestino === gado.IdFazenda) {
+        throw new BadRequestException('O animal já está nesta fazenda.');
+      }
+      await this.acesso.garantirAcessoFazenda(idPessoa, dto.IdFazendaDestino);
+      const destino = await this.prisma.fazenda.findUnique({
+        where: { IdFazenda: dto.IdFazendaDestino },
+      });
+      data = { IdFazenda: destino.IdFazenda, AtualizadoEm: agora };
+      entradas.push({
+        Campo: 'Transferencia',
+        ValorAnterior: gado.Fazenda.Nome,
+        ValorNovo: destino.Nome,
+      });
+    } else {
+      data = {
+        Ativo: false,
+        DataSaida: dto.Data,
+        MotivoSaida: dto.Motivo,
+        ObservacaoSaida: dto.Observacao?.trim() || null,
+        AtualizadoEm: agora,
+      };
+      entradas.push({
+        Campo: 'Saida',
+        ValorNovo: [dto.Motivo, dto.Observacao?.trim()]
+          .filter(Boolean)
+          .join(' - ')
+          .slice(0, 100),
+      });
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const atualizado = await tx.gado.update({ where: { IdGado: id }, data });
+      await tx.gadoHistorico.createMany({
+        data: entradas.map((entrada) => ({
+          ...entrada,
+          IdGado: id,
+          IdPessoa: idPessoa,
+          CriadoEm: agora,
+        })),
+      });
+      return atualizado;
+    });
+  }
+
+  async BuscarGenealogia(id: number) {
+    const resumo = {
+      IdGado: true,
+      Nome: true,
+      NumeroIdentificacao: true,
+      IdSexo: true,
+      IdPai: true,
+      IdMae: true,
+      Ativo: true,
+      Raca: { select: { Nome: true } },
+    } as const;
+    const gado = await this.prisma.gado.findUnique({
+      where: { IdGado: id },
+      select: {
+        ...resumo,
+        Pai: {
+          select: {
+            ...resumo,
+            Pai: { select: resumo },
+            Mae: { select: resumo },
+          },
+        },
+        Mae: {
+          select: {
+            ...resumo,
+            Pai: { select: resumo },
+            Mae: { select: resumo },
+          },
+        },
+        FilhosComoPai: { select: resumo, orderBy: { DataNascimento: 'asc' } },
+        FilhosComoMae: { select: resumo, orderBy: { DataNascimento: 'asc' } },
       },
     });
+    if (!gado) {
+      throw new BadRequestException(`Gado com ID ${id} não encontrado.`);
+    }
+
+    const { Pai, Mae, FilhosComoPai, FilhosComoMae, ...animal } = gado;
+    let consanguinidade = false;
+    if (Pai && Mae) {
+      const emComum = (a: number | null, b: number | null) =>
+        a != null && a === b;
+      consanguinidade =
+        Mae.IdPai === Pai.IdGado ||
+        Pai.IdMae === Mae.IdGado ||
+        emComum(Pai.IdPai, Mae.IdPai) ||
+        emComum(Pai.IdMae, Mae.IdMae);
+    }
+    return {
+      ...animal,
+      Pai,
+      Mae,
+      Filhos: [...FilhosComoPai, ...FilhosComoMae],
+      Consanguinidade: consanguinidade,
+    };
   }
 
   async vacinarGado(vacinarGadoDto: VacinarGadoDto, idPessoa?: number) {
     const { IdGado, IdVacina, DataAplicacao, DataProxima } = vacinarGadoDto;
+    await this.garantirAtivo(IdGado);
 
     const vacina = await this.prisma.vacina.findUnique({
       where: { IdVacina },
@@ -488,6 +748,7 @@ export class GadoService {
         Sexo: true,
         TipoGado: true,
         Raca: true,
+        Fazenda: { select: { IdFazenda: true, Nome: true } },
         GadoFemea: {
           include: { GadoLeiteiro: true, StatusPrenhez: true },
         },
@@ -501,7 +762,7 @@ export class GadoService {
       throw new BadRequestException(`Gado com ID ${gadoId} não encontrado.`);
     }
 
-    return gado;
+    return { ...gado, PrevisaoParto: previsaoParto(gado.GadoFemea) };
   }
 
   async BuscarVacinasPorGado(gadoId: number) {
