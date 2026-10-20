@@ -38,6 +38,13 @@ export class FazendaService {
       );
     }
 
+    const dono = await this.prisma.pessoa.findUnique({
+      where: { IdPessoa: IdDono },
+    });
+    if (!dono) {
+      throw new BadRequestException(`A pessoa com o ID ${IdDono} não existe.`);
+    }
+
     const endereco = await this.prisma.endereco.create({
       data: {
         Logradouro,
@@ -58,11 +65,12 @@ export class FazendaService {
         IdDono,
       },
     });
-    await this.prisma.fazendaPessoa.create({
-      data: {
-        IdPessoa,
+    // Quem cadastrou e o dono passam a ter acesso à fazenda.
+    await this.prisma.fazendaPessoa.createMany({
+      data: [...new Set([IdPessoa, IdDono])].map((id) => ({
+        IdPessoa: id,
         IdFazenda: fazendaData.IdFazenda,
-      },
+      })),
     });
 
     const fazenda = await this.prisma.fazenda.findUnique({

@@ -24,7 +24,7 @@ export class UpdateGadoDto {
   IdSexo?: number;
 
   @IsOptional()
-  @IsInt()
+  @IsNumber({ maxDecimalPlaces: 2 })
   PesoNascimentoEmKg?: number;
 
   @IsOptional()

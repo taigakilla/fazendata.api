@@ -18,7 +18,7 @@ export class CreateGadoDto {
   @IsInt()
   IdSexo: number;
 
-  @IsInt()
+  @IsNumber({ maxDecimalPlaces: 2 })
   PesoNascimentoEmKg: number;
 
   @IsNumber({ maxDecimalPlaces: 2 })

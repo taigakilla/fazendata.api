@@ -1,4 +1,4 @@
-import { IsInt, IsString, MaxLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateFazendaDto {
   @IsString()
@@ -32,6 +32,8 @@ export class CreateFazendaDto {
   @IsString()
   Nome: string;
 
+  // Ignorado: a API usa o usuário logado.
+  @IsOptional()
   @IsInt()
-  IdPessoa: number;
+  IdPessoa?: number;
 }

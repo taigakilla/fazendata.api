@@ -15,7 +15,7 @@ model Gado {
   NumeroIdentificacao Int
   DataNascimento      DateTime
   IdSexo              Int
-  PesoNascimentoEmKg  Int
+  PesoNascimentoEmKg  Decimal        @db.Decimal(5, 2)
   PesoAtual           Decimal        @db.Decimal(5, 2)
   IdRaca              Int
   Nome                String         @db.VarChar(40)
@@ -214,10 +214,10 @@ model FazendaPessoa {
 model Pessoa {
   IdPessoa   Int    @id @default(autoincrement())
   Nome       String @db.VarChar(100)
-  IdEndereco Int
+  IdEndereco Int?
   IdSexo     Int
 
-  Endereco      Endereco        @relation(fields: [IdEndereco], references: [IdEndereco])
+  Endereco      Endereco?       @relation(fields: [IdEndereco], references: [IdEndereco])
   Sexo          Sexo            @relation(fields: [IdSexo], references: [IdSexo])
   FazendaPessoa FazendaPessoa[]
 
