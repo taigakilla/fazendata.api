@@ -75,7 +75,7 @@ export class GadoService {
     ];
 
     for (const [id, busca, mensagem] of checagens) {
-      if (id !== undefined && !(await busca)) {
+      if (id != null && !(await busca)) {
         throw new BadRequestException(mensagem);
       }
     }
@@ -100,13 +100,13 @@ export class GadoService {
 
     // Tudo é validado antes de gravar, para não sobrar gado pela metade.
     this.validarSexoDoTipo(IdTipoGado, IdSexo);
-    if (IdTipoGado === TIPO_GADO.LEITEIRO && IdStatusPrenhez === undefined) {
+    if (IdTipoGado === TIPO_GADO.LEITEIRO && IdStatusPrenhez == null) {
       throw new BadRequestException(
         'Status de prenhez é obrigatório para gado leiteiro.',
       );
     }
     if (IdTipoGado === TIPO_GADO.CORTE) {
-      if (idadePrevistaAbate === undefined || ganhoDePesoMensal === undefined) {
+      if (idadePrevistaAbate == null || ganhoDePesoMensal == null) {
         throw new BadRequestException(
           'Idade prevista de abate e ganho de peso mensal são obrigatórios para gado de corte.',
         );
@@ -114,9 +114,9 @@ export class GadoService {
     }
     if (IdTipoGado === TIPO_GADO.REPRODUTOR) {
       if (
-        volumeSemenDisponivel === undefined ||
-        motilidade === undefined ||
-        concentracao === undefined
+        volumeSemenDisponivel == null ||
+        motilidade == null ||
+        concentracao == null
       ) {
         throw new BadRequestException(
           'Volume de sêmen, motilidade e concentração são obrigatórios para gado reprodutor.',
