@@ -9,24 +9,44 @@ datasource db {
 }
 
 model Gado {
-  IdGado              Int            @id @default(autoincrement())
+  IdGado              Int             @id @default(autoincrement())
   IdTipoGado          Int
   IdFazenda           Int
   NumeroIdentificacao Int
   DataNascimento      DateTime
   IdSexo              Int
-  PesoNascimentoEmKg  Decimal        @db.Decimal(5, 2)
-  PesoAtual           Decimal        @db.Decimal(5, 2)
+  PesoNascimentoEmKg  Decimal         @db.Decimal(5, 2)
+  PesoAtual           Decimal         @db.Decimal(5, 2)
   IdRaca              Int
-  Nome                String         @db.VarChar(40)
-  TipoGado            TipoGado       @relation(fields: [IdTipoGado], references: [IdTipoGado])
-  Fazenda             Fazenda        @relation(fields: [IdFazenda], references: [IdFazenda])
-  Sexo                Sexo           @relation(fields: [IdSexo], references: [IdSexo])
-  Raca                Raca           @relation(fields: [IdRaca], references: [IdRaca])
+  Nome                String          @db.VarChar(40)
+  TipoGado            TipoGado        @relation(fields: [IdTipoGado], references: [IdTipoGado])
+  Fazenda             Fazenda         @relation(fields: [IdFazenda], references: [IdFazenda])
+  Sexo                Sexo            @relation(fields: [IdSexo], references: [IdSexo])
+  Raca                Raca            @relation(fields: [IdRaca], references: [IdRaca])
   GadoFemea           GadoFemea?
   GadoMacho           GadoMacho?
+  // Última alteração em qualquer dado do gado (inclui vacinas); usada para
+  // saber se uma tag NFC foi gravada antes de mudanças.
+  AtualizadoEm        DateTime        @default(now())
   Projenitores        Projenitores[]
   AnimalVacina        AnimalVacina[]
+  Historico           GadoHistorico[]
+}
+
+// Uma linha por campo alterado (ou evento, como cadastro e vacinação).
+model GadoHistorico {
+  IdHistorico   Int      @id @default(autoincrement())
+  IdGado        Int
+  Campo         String   @db.VarChar(40)
+  ValorAnterior String?  @db.VarChar(100)
+  ValorNovo     String?  @db.VarChar(100)
+  IdPessoa      Int?
+  CriadoEm      DateTime @default(now())
+
+  Gado   Gado    @relation(fields: [IdGado], references: [IdGado], onDelete: Cascade)
+  Pessoa Pessoa? @relation(fields: [IdPessoa], references: [IdPessoa])
+
+  @@index([IdGado, CriadoEm])
 }
 
 model GadoMacho {
@@ -222,6 +242,8 @@ model Pessoa {
   FazendaPessoa FazendaPessoa[]
 
   Usuario Usuario?
+
+  GadoHistorico GadoHistorico[]
 
   Fazenda Fazenda[]
 }

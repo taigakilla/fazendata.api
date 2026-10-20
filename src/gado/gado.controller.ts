@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,6 +7,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { UsuarioLogado } from '../auth/usuario-logado.decorator';
 import { AcessoService } from '../shared/acesso/acesso.service';
@@ -30,7 +32,7 @@ export class GadoController {
       idPessoa,
       createGadoDto.IdFazenda,
     );
-    return this.gadoService.create(createGadoDto);
+    return this.gadoService.create(createGadoDto, idPessoa);
   }
   @Patch(':id')
   async update(
@@ -45,7 +47,7 @@ export class GadoController {
         updateGadoDto.IdFazenda,
       );
     }
-    return this.gadoService.update(id, updateGadoDto);
+    return this.gadoService.update(id, updateGadoDto, idPessoa);
   }
 
   @Get('fazenda/:fazendaId')
@@ -65,6 +67,25 @@ export class GadoController {
     return this.gadoService.BuscarGadoPorId(GadoId);
   }
 
+  // `desde` (ISO ou epoch em ms) limita às alterações posteriores, usado para
+  // mostrar o que mudou desde a gravação da tag NFC.
+  @Get(':GadoId/historico')
+  async BuscarHistorico(
+    @UsuarioLogado() idPessoa: number,
+    @Param('GadoId', ParseIntPipe) GadoId: number,
+    @Query('desde') desde?: string,
+  ) {
+    await this.acessoService.garantirAcessoGado(idPessoa, GadoId);
+    let data: Date | undefined;
+    if (desde) {
+      data = new Date(/^\d+$/.test(desde) ? Number(desde) : desde);
+      if (isNaN(data.getTime())) {
+        throw new BadRequestException('Parâmetro "desde" inválido.');
+      }
+    }
+    return this.gadoService.BuscarHistorico(GadoId, data);
+  }
+
   @Post('vacinar')
   async vacinar(
     @UsuarioLogado() idPessoa: number,
@@ -74,7 +95,7 @@ export class GadoController {
       idPessoa,
       vacinarGadoDto.IdGado,
     );
-    return this.gadoService.vacinarGado(vacinarGadoDto);
+    return this.gadoService.vacinarGado(vacinarGadoDto, idPessoa);
   }
 
   @Get('vacina/:id')

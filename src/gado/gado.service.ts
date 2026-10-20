@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../shared/prisma/prisma.service';
 import { CreateGadoDto } from './dto/create-gado.dto';
 import { UpdateGadoDto } from './dto/update-gado.dto';
 import { VacinarGadoDto } from './dto/vacinar-gado.dto';
+import { diferencas, EntradaHistorico, normalizar } from './historico';
 
 export const TIPO_GADO = { LEITEIRO: 1, CORTE: 2, REPRODUTOR: 3 } as const;
 export const SEXO = { MACHO: 1, FEMEA: 2 } as const;
@@ -81,7 +83,7 @@ export class GadoService {
     }
   }
 
-  async create(createGadoDto: CreateGadoDto) {
+  async create(createGadoDto: CreateGadoDto, idPessoa?: number) {
     const {
       IdTipoGado,
       IdSexo,
@@ -132,9 +134,44 @@ export class GadoService {
         IdTipoGado === TIPO_GADO.LEITEIRO ? IdStatusPrenhez : undefined,
     });
 
+    const status =
+      IdTipoGado === TIPO_GADO.LEITEIRO
+        ? await this.prisma.statusPrenhez.findUnique({
+            where: { IdStatusPrenhez },
+          })
+        : null;
+
     return this.prisma.$transaction(async (tx) => {
       const gado = await tx.gado.create({
         data: { ...gadoData, IdTipoGado, IdSexo },
+      });
+
+      // Ponto de partida do histórico (peso, prenhez e inseminação).
+      const entradas: EntradaHistorico[] = [
+        {
+          Campo: 'Cadastro',
+          ValorNovo: gado.Nome || `Nº ${gado.NumeroIdentificacao}`,
+        },
+        { Campo: 'PesoAtual', ValorNovo: normalizar(gado.PesoAtual) },
+      ];
+      if (status) {
+        entradas.push({
+          Campo: 'StatusPrenhez',
+          ValorNovo: status.Descricao.trim(),
+        });
+      }
+      if (ultimaInseminacao) {
+        entradas.push({
+          Campo: 'UltimaInseminacao',
+          ValorNovo: normalizar(ultimaInseminacao),
+        });
+      }
+      await tx.gadoHistorico.createMany({
+        data: entradas.map((entrada) => ({
+          ...entrada,
+          IdGado: gado.IdGado,
+          IdPessoa: idPessoa,
+        })),
       });
 
       switch (IdTipoGado) {
@@ -189,7 +226,7 @@ export class GadoService {
     });
   }
 
-  async update(id: number, updateGadoDto: UpdateGadoDto) {
+  async update(id: number, updateGadoDto: UpdateGadoDto, idPessoa?: number) {
     const {
       IdTipoGado,
       IdSexo,
@@ -208,7 +245,13 @@ export class GadoService {
 
     const existente = await this.prisma.gado.findUnique({
       where: { IdGado: id },
-      select: { IdTipoGado: true, IdSexo: true },
+      include: {
+        Sexo: true,
+        Raca: true,
+        Fazenda: true,
+        GadoFemea: { include: { StatusPrenhez: true, GadoLeiteiro: true } },
+        GadoMacho: { include: { GadoCorte: true, GadoReprodutor: true } },
+      },
     });
     if (!existente) {
       throw new BadRequestException(`Gado com ID ${id} não encontrado.`);
@@ -230,11 +273,30 @@ export class GadoService {
         tipo === TIPO_GADO.LEITEIRO ? IdStatusPrenhez : undefined,
     });
 
+    const entradas = await this.calcularAlteracoes(existente, updateGadoDto);
+    // Mesmo instante no gado e no histórico, para a comparação com a tag NFC.
+    const agora = new Date();
+
     return this.prisma.$transaction(async (tx) => {
       const gado = await tx.gado.update({
         where: { IdGado: id },
-        data: { ...gadoData, IdSexo },
+        data: {
+          ...gadoData,
+          IdSexo,
+          ...(entradas.length > 0 && { AtualizadoEm: agora }),
+        },
       });
+
+      if (entradas.length > 0) {
+        await tx.gadoHistorico.createMany({
+          data: entradas.map((entrada) => ({
+            ...entrada,
+            IdGado: id,
+            IdPessoa: idPessoa,
+            CriadoEm: agora,
+          })),
+        });
+      }
 
       switch (tipo) {
         case TIPO_GADO.LEITEIRO:
@@ -281,6 +343,92 @@ export class GadoService {
     });
   }
 
+  private async calcularAlteracoes(
+    existente: Prisma.GadoGetPayload<{
+      include: {
+        Sexo: true;
+        Raca: true;
+        Fazenda: true;
+        GadoFemea: { include: { StatusPrenhez: true; GadoLeiteiro: true } };
+        GadoMacho: { include: { GadoCorte: true; GadoReprodutor: true } };
+      };
+    }>,
+    dto: UpdateGadoDto,
+  ) {
+    // Para ids, o histórico guarda o nome (ex.: raça "Nelore"), não o número.
+    const [sexo, raca, fazenda, status] = await Promise.all([
+      dto.IdSexo != null
+        ? this.prisma.sexo.findUnique({ where: { IdSexo: dto.IdSexo } })
+        : null,
+      dto.IdRaca != null
+        ? this.prisma.raca.findUnique({ where: { IdRaca: dto.IdRaca } })
+        : null,
+      dto.IdFazenda != null
+        ? this.prisma.fazenda.findUnique({
+            where: { IdFazenda: dto.IdFazenda },
+          })
+        : null,
+      dto.IdStatusPrenhez != null
+        ? this.prisma.statusPrenhez.findUnique({
+            where: { IdStatusPrenhez: dto.IdStatusPrenhez },
+          })
+        : null,
+    ]);
+    const leiteiro = existente.GadoFemea?.GadoLeiteiro;
+    const corte = existente.GadoMacho?.GadoCorte;
+    const reprodutor = existente.GadoMacho?.GadoReprodutor;
+
+    return diferencas({
+      Nome: [existente.Nome, dto.Nome],
+      NumeroIdentificacao: [
+        existente.NumeroIdentificacao,
+        dto.NumeroIdentificacao,
+      ],
+      DataNascimento: [existente.DataNascimento, dto.DataNascimento],
+      Sexo: [existente.Sexo.Descricao.trim(), sexo?.Descricao.trim()],
+      Raca: [existente.Raca.Nome, raca?.Nome],
+      Fazenda: [existente.Fazenda.Nome, fazenda?.Nome],
+      PesoNascimentoEmKg: [
+        existente.PesoNascimentoEmKg,
+        dto.PesoNascimentoEmKg,
+      ],
+      PesoAtual: [existente.PesoAtual, dto.PesoAtual],
+      ...(existente.GadoFemea && {
+        StatusPrenhez: [
+          existente.GadoFemea.StatusPrenhez.Descricao.trim(),
+          status?.Descricao.trim(),
+        ],
+        UltimaInseminacao: [leiteiro?.UltimaInseminacao, dto.ultimaInseminacao],
+        QuantidadePartos: [leiteiro?.QuantidadePartos, dto.quantidadePartos],
+        ProducaoLeiteDiariaEmLitros: [
+          leiteiro?.ProducaoLeiteDiariaEmLitros,
+          dto.producaoLeiteDiariaEmLitros,
+        ],
+      }),
+      ...(corte && {
+        DataAbate: [corte.DataAbate, dto.dataAbate],
+        IdadePrevistaAbate: [corte.IdadePrevistaAbate, dto.idadePrevistaAbate],
+        GanhoDePesoMensal: [corte.GanhoDePesoMensal, dto.ganhoDePesoMensal],
+      }),
+      ...(reprodutor && {
+        VolumeSemenDisponivel: [
+          reprodutor.VolumeSemenDisponivel,
+          dto.volumeSemenDisponivel,
+        ],
+        Motilidade: [reprodutor.Motilidade, dto.motilidade],
+        Concentracao: [reprodutor.Concentracao, dto.concentracao],
+      }),
+    });
+  }
+
+  async BuscarHistorico(gadoId: number, desde?: Date) {
+    return this.prisma.gadoHistorico.findMany({
+      where: { IdGado: gadoId, ...(desde && { CriadoEm: { gt: desde } }) },
+      include: { Pessoa: { select: { IdPessoa: true, Nome: true } } },
+      orderBy: [{ CriadoEm: 'desc' }, { IdHistorico: 'desc' }],
+    });
+  }
+
   async BuscarAnimalPorFazenda(fazendaId: number) {
     return this.prisma.gado.findMany({
       where: {
@@ -294,7 +442,7 @@ export class GadoService {
     });
   }
 
-  async vacinarGado(vacinarGadoDto: VacinarGadoDto) {
+  async vacinarGado(vacinarGadoDto: VacinarGadoDto, idPessoa?: number) {
     const { IdGado, IdVacina, DataAplicacao, DataProxima } = vacinarGadoDto;
 
     const vacina = await this.prisma.vacina.findUnique({
@@ -305,13 +453,31 @@ export class GadoService {
       throw new BadRequestException(`Vacina com ID ${IdVacina} não existe.`);
     }
 
-    return this.prisma.animalVacina.create({
-      data: {
-        IdGado,
-        IdVacina: vacina.IdVacina,
-        DataAplicacao,
-        DataProxima,
-      },
+    const agora = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const aplicacao = await tx.animalVacina.create({
+        data: {
+          IdGado,
+          IdVacina: vacina.IdVacina,
+          DataAplicacao,
+          DataProxima,
+        },
+      });
+      await tx.gado.update({
+        where: { IdGado },
+        data: { AtualizadoEm: agora },
+      });
+      await tx.gadoHistorico.create({
+        data: {
+          IdGado,
+          Campo: 'Vacina',
+          ValorNovo: vacina.Nome,
+          IdPessoa: idPessoa,
+          CriadoEm: agora,
+        },
+      });
+      return aplicacao;
     });
   }
 
