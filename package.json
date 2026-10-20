@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "npx prisma generate && nest build",
+    "dados-teste": "node -r ts-node/register/transpile-only prisma/dados-teste.ts",
     "build:render": "npx prisma generate && npx prisma migrate deploy && npx prisma db seed && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "npx prisma generate && nest start",
